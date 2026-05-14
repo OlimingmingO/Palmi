@@ -1,0 +1,105 @@
+version: "3.8"
+
+services:
+  # === Application Services ===
+  
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: palmi-app
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: palmi-celery-worker
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=4 -Q default,high_priority,low_priority
+
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: palmi-scheduler
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    command: python -m app.cron.scheduler
+
+  ops-frontend:
+    build:
+      context: ./frontend/ops-dashboard
+      dockerfile: Dockerfile
+    container_name: palmi-ops-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  # === Infrastructure Services ===
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: palmi-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: palmi
+      POSTGRES_USER: palmi
+      POSTGRES_PASSWORD: palmi_secret
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U palmi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: palmi-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Node
+node_modules/
+.next/
+out/
+.taro/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Docker
+docker-compose.override.yml
+
+# Data (PKE vaults - runtime only)
+data/users/
+data/_shared/knowledge/*.md
+!data/.gitkeep
+!data/_shared/
+!data/_shared/knowledge/
+!data/_shared/knowledge/.gitkeep
+
+# PKE state
+.pke/
+
+# Test / Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Logs
+*.log
+logs/
+
+# Alembic
+migrations/versions/*.py
+!migrations/versions/.gitkeep
+
+# Mini-program build
+frontend/configurator/dist/
+
+# Frontend build
+frontend/ops-dashboard/dist/
