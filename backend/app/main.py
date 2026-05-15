@@ -32,3 +32,9 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
+
+
+@app.get("/api/health")
+async def health_check():
+    """Liveness probe."""
+    return {"status": "ok"}

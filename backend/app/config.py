@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     WECOM_SECRET: str = ""
     WECOM_CORP_ID: str = ""
     WECOM_AGENT_ID: str = ""
+    WECOM_TOKEN: str = ""  # Callback verification token
+    WECOM_ENCODING_AES_KEY: str = ""  # 43-char Base64 encoding AES key
 
     # LLM
     LLM_PRIMARY_MODEL: str = "qwen-max"
