@@ -24,4 +24,19 @@ async def get_or_create_elder(db: AsyncSession, wechat_user_id: str) -> Elder:
         db.add(elder)
         await db.flush()  # Get the ID without committing
 
+        # Initialize PKE vault for new elder
+        from app.pke.pke_service import pke_service
+        pke_service.init_vault(str(elder.id))
+
     return elder
+
+
+def get_active_elders_sync():
+    """Synchronous version for Celery tasks."""
+    from app.database import sync_session_factory
+    from sqlalchemy import select
+
+    with sync_session_factory() as session:
+        stmt = select(Elder).where(Elder.status == "active")
+        result = session.execute(stmt)
+        return result.scalars().all()

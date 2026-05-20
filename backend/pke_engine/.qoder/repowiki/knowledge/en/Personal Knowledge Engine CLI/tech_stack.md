@@ -1,0 +1,3 @@
+- **Node.js ESM**: Uses native `node:fs`, `node:path`, and `node:http` modules without external npm dependencies for the runtime.
+- **MinerU qmd**: Relies on the `qmd` CLI for vector search and document indexing, configured via `PKE_QMD_PATH`.
+- **SHA-256 Hashing**: Uses `node:crypto` for content-addressable change detection in vault scanning.

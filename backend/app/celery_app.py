@@ -1,5 +1,6 @@
 """Celery application configuration with task routing."""
 from celery import Celery
+from celery.schedules import crontab
 
 from app.config import settings
 
@@ -28,6 +29,16 @@ celery_app.conf.update(
     task_default_queue="default",
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    beat_schedule={
+        "morning-greeting": {
+            "task": "tasks.proactive.send_morning_greeting",
+            "schedule": crontab(hour=8, minute=0),
+        },
+        "daily-pke-compile": {
+            "task": "tasks.memory.compile_all_elders",
+            "schedule": crontab(hour=3, minute=0),
+        },
+    },
 )
 
 celery_app.autodiscover_tasks(["app.tasks"])

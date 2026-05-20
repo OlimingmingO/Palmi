@@ -1,0 +1,4 @@
+- Commands default to human-readable stdout output and switch to structured JSON only when the `--json` flag is explicitly provided.
+- Wiki patch operations are strictly append-only, targeting specific sections like 'Evidence' or 'Open Questions' to prevent overwriting existing knowledge.
+- Vault scanning skips files larger than 10 MB and ignores dotfiles (except `.pke`) to maintain performance and avoid system artifacts.
+- State files are written using a recursive directory creation pattern (`fs.mkdirSync({ recursive: true })`) before every write operation to ensure artifact persistence.

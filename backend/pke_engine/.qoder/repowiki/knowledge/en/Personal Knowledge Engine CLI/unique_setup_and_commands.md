@@ -1,0 +1,3 @@
+- **Environment Configuration**: Requires `PKE_VAULT` (default `~/MyKnowledge`) and `PKE_QMD_PATH` (default `/opt/homebrew/bin`) to be set or defaulted in the script.
+- **Smoke Test**: Run `npm run smoke` or `node scripts/pke.mjs help` to verify CLI connectivity.
+- **Dashboard Launch**: Start the local knowledge health UI with `pke dashboard --port 8787`.

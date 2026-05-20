@@ -9,10 +9,14 @@ import logging
 from fastapi import APIRouter, Request, Response, Query, BackgroundTasks
 
 from app.config import settings
+from app.database import async_session_factory
 from app.gateway.wecom_crypto import WXBizMsgCrypt, WeComCryptoError
 from app.gateway.wecom_callback import parse_callback_message, extract_encrypt_from_body
 from app.gateway.wecom_api import send_text_message
+from app.services import elder_service, conversation_service
 from app.services.dialogue import get_reply
+from app.pke.pke_service import pke_service
+from app.tasks.memory import capture_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -114,18 +118,60 @@ async def receive_message(
 
 
 async def _process_and_reply(user_id: str, content: str):
-    """Background task: get LLM reply and send via WeCom API.
+    """Background task: resolve elder, query memory, get LLM reply, persist, and send.
 
-    Args:
-        user_id: WeCom user ID (FromUserName)
-        content: User's text message
+    Phase 1 flow:
+    1. Resolve WeCom user → elder record (auto-create if new)
+    2. Load recent conversation history from DB
+    3. Query PKE memory for relevant context
+    4. Call LLM with persona + memory + history
+    5. Persist both user message and reply to DB
+    6. Async capture to PKE vault (Celery task)
+    7. Send reply via WeCom API
     """
     try:
-        # For Phase 0, use user_id as elder_id directly (no DB lookup yet in background)
-        reply = await get_reply(elder_id=user_id, user_message=content)
+        async with async_session_factory() as session:
+            async with session.begin():
+                # 1. Resolve or create elder
+                elder = await elder_service.get_or_create_elder(
+                    db=session, wechat_user_id=user_id
+                )
+                elder_id = str(elder.id)
 
-        # Send reply via WeCom API
+                # 2. Load conversation history from DB
+                history = await conversation_service.get_recent(
+                    db=session, elder_id=elder.id, limit=10
+                )
+
+                # 3. Query PKE memory (fail-open, won't block on error)
+                memory_ctx = await pke_service.query(elder_id, content)
+
+                # 4. Call LLM with persona + memory + history
+                reply = await get_reply(
+                    elder_id=elder_id,
+                    user_message=content,
+                    history=history,
+                    memory_context=memory_ctx,
+                )
+
+                # 5. Persist new exchange to DB
+                await conversation_service.save_message(
+                    db=session, elder_id=elder.id, role="user", content=content
+                )
+                await conversation_service.save_message(
+                    db=session, elder_id=elder.id, role="assistant", content=reply
+                )
+
+        # 6. Async capture to PKE vault (outside DB transaction)
+        try:
+            capture_conversation.delay(elder_id, content, reply)
+        except Exception as e:
+            logger.warning("Failed to queue PKE capture: %s", e)
+
+        # 7. Send reply via WeCom API
         await send_text_message(user_id=user_id, content=reply)
 
     except Exception as e:
-        logger.error("Failed to process reply for user %s: %s", user_id, str(e), exc_info=True)
+        logger.error(
+            "Failed to process reply for user %s: %s", user_id, str(e), exc_info=True
+        )

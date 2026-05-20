@@ -37,6 +37,22 @@ services:
     restart: unless-stopped
     command: celery -A app.celery_app worker --loglevel=info --concurrency=4 -Q default,high_priority,low_priority
 
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: palmi-celery-beat
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    command: celery -A app.celery_app beat --loglevel=info
+
   scheduler:
     build:
       context: ./backend

@@ -1,0 +1,21 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: main
+exported_at: "2026-05-14T23:30:59Z"
+modules:
+    "":
+        dir_name: Personal Knowledge Engine CLI
+        title: Personal Knowledge Engine CLI
+        scope:
+            - README.md
+            - .gitignore
+            - package.json
+            - scripts/
+            - docs/
+            - skills/
+            - integrations/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

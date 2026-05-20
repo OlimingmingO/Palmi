@@ -1,0 +1,1 @@
+A local-first, approval-gated CLI that transforms raw evidence files into governed wiki knowledge using semantic retrieval and append-only patches.

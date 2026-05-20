@@ -1,0 +1,5 @@
+- **Single-File Architecture**: The entire engine is implemented in `scripts/pke.mjs` as a self-contained Node.js ESM script, acting as both the CLI entry point and the core logic layer.
+- **External Retrieval Engine**: Delegates all indexing, embedding, and semantic querying to the external `qmd` (MinerU Document Explorer) binary via `spawnSync`, treating it as a black-box retrieval service.
+- **Proposal-Gated Mutation**: Enforces a strict separation between observation and mutation; commands like `compile`, `daily`, and `monitor` are read-only and generate proposals, while only `pke apply` performs wiki writes after explicit user approval.
+- **Local State Management**: Maintains engine state through JSON artifacts in `.pke/` (e.g., `state.json` for baselines, `events.jsonl` for audit logs, and `proposals/` for pending patches), ensuring no external database dependencies.
+- **Scoped Observability**: Implements a polling-based monitor (`pke monitor --watch`) that detects file changes and classifies them into semantic events (e.g., `conflict_detected`, `stale_claim_detected`) by parsing Markdown section headers.

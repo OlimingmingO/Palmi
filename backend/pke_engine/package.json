@@ -1,0 +1,17 @@
+{
+  "name": "personal-knowledge-engine-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first Personal Knowledge Engine MVP for governed raw-note-to-wiki workflows.",
+  "type": "module",
+  "bin": {
+    "pke": "./bin/pke"
+  },
+  "scripts": {
+    "smoke": "node scripts/pke.mjs help"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

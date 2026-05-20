@@ -1,0 +1,14 @@
+schema_version: 1
+module_path: ""
+title: Personal Knowledge Engine CLI
+scope:
+    - README.md
+    - .gitignore
+    - package.json
+    - scripts/
+    - docs/
+    - skills/
+    - integrations/
+source_files: []
+depends_on: []
+related_to: []
