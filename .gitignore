@@ -62,3 +62,7 @@ frontend/configurator/dist/
 
 # Frontend build
 frontend/ops-dashboard/dist/
+
+# macOS metadata files
+._*
+**/.DS_Store
