@@ -83,7 +83,7 @@ chmod +x /opt/scripts/palmi_deploy.sh
 | macOS `._*` metadata files corrupt Docker image | Always run `find . -name "._*" -delete` before packaging |
 | `.env` must exist in project root | Keep both `/opt/Palmi/.env` and `/opt/Palmi/backend/.env` |
 | Alembic null byte error from `._*` files | deploy script runs `find /opt/Palmi -name "._*" -delete` |
-| `npm ci` fails (frontend not needed for Phase 0) | Start only `postgres redis app` services |
+| `npm ci` fails (frontend not needed for Phase 0/1) | Start only `postgres redis app celery-worker celery-beat` services |
 | Certbot requires a real email | Use a real email, not placeholder |
 
 ---
@@ -102,7 +102,7 @@ cd /Users/lizhentao/Elder/Palmi
 ## Service Health Check
 
 ```bash
-# Check containers
+# Check containers (postgres, redis, app, celery-worker, celery-beat)
 docker-compose -f /opt/Palmi/docker-compose.yml ps
 
 # Check app health
@@ -110,4 +110,45 @@ curl https://palmi.aiotzz.cn/api/health
 
 # View app logs
 docker-compose -f /opt/Palmi/docker-compose.yml logs --tail=50 app
+
+# View Celery worker / beat logs
+docker-compose -f /opt/Palmi/docker-compose.yml logs --tail=50 celery-worker
+docker-compose -f /opt/Palmi/docker-compose.yml logs --tail=50 celery-beat
 ```
+
+---
+
+## Runtime Services
+
+The deployment runs five containers via `docker-compose`:
+
+| Service | Purpose |
+|---|---|
+| `postgres` | PostgreSQL 15, stores elders / conversations / tasks |
+| `redis` | Redis 7, Celery broker (DB 0) and result backend (DB 1) |
+| `app` | FastAPI + Uvicorn, serves WeCom callback and admin APIs |
+| `celery-worker` | Async tasks (PKE capture, side effects) |
+| `celery-beat` | Scheduled jobs (08:00 morning greeting, 03:00 daily PKE compile) |
+
+## Database Migrations
+
+Alembic migrations run automatically at the end of `palmi_deploy.sh`:
+
+```bash
+docker-compose exec -T app alembic upgrade head
+```
+
+If you need to run them manually on the ECS host:
+
+```bash
+cd /opt/Palmi
+docker-compose exec app alembic upgrade head
+```
+
+## Node.js / PKE
+
+The Personal Knowledge Engine is a Node.js CLI invoked from Python as a
+subprocess (fail-open, 1s timeout). **Node.js and the `pke_engine/` package
+are bundled inside the `app` Docker image** — no separate install on the host
+is required. The PKE vault is persisted under `/data` (mounted from
+`./data` on the host).
