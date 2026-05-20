@@ -3,7 +3,10 @@ FROM python:3.11-slim as builder
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN pip install --no-cache-dir --prefix=/install \
+    -i https://mirrors.aliyun.com/pypi/simple/ \
+    --trusted-host mirrors.aliyun.com \
+    -r requirements.txt
 
 # Stage 2: Runtime
 FROM python:3.11-slim
