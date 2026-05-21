@@ -155,7 +155,7 @@ async def _process_and_reply(user_id: str, content: str):
                 )
 
                 # 5. Persist new exchange to DB
-                await conversation_service.save_message(
+                user_msg = await conversation_service.save_message(
                     db=session, elder_id=elder.id, role="user", content=content
                 )
                 await conversation_service.save_message(
@@ -167,6 +167,13 @@ async def _process_and_reply(user_id: str, content: str):
             capture_conversation.delay(elder_id, content, reply)
         except Exception as e:
             logger.warning("Failed to queue PKE capture: %s", e)
+
+        # 6b. Fire intent-tagging task for user message
+        try:
+            from app.tasks.tags import classify_tags
+            classify_tags.delay(str(elder.id), str(user_msg.id))
+        except Exception as _tag_err:
+            logger.warning("Failed to queue intent classification: %s", _tag_err)
 
         # 7. Send reply via WeCom API
         await send_text_message(user_id=user_id, content=reply)

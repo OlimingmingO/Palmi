@@ -21,7 +21,6 @@ Last updated: 2025-05-20
 
 ## Phase 2 (Not Started)
 - Weather/calendar-aware trigger engine
-- Phone call integration (Alibaba Cloud Voice)
 - Enhanced PKE compile (Light/REM/Deep sleep cycles)
 - Frequency control (max 2 proactive touches daily)
 - Multi-modal responses (voice notes)

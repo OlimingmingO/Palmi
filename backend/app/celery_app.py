@@ -38,6 +38,14 @@ celery_app.conf.update(
             "task": "tasks.memory.compile_all_elders",
             "schedule": crontab(hour=3, minute=0),
         },
+        "trigger-evaluate": {
+            "task": "tasks.trigger.evaluate_all_elders",
+            "schedule": crontab(minute="*/15"),
+        },
+        "trigger-daily-reset": {
+            "task": "tasks.trigger.reset_daily_trigger_counts",
+            "schedule": crontab(hour=0, minute=0),
+        },
     },
 )
 

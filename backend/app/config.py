@@ -35,8 +35,16 @@ class Settings(BaseSettings):
     PKE_MAX_RAW_FILES: int = 365
     PKE_COMPILE_CRON: str = "0 3 * * *"
 
-    # Phone Call
-    MAX_CALL_DURATION_SEC: int = 1800
+    # Weather trigger
+    WEATHER_LAT: float = 31.23   # Default: Shanghai
+    WEATHER_LON: float = 121.47
+    WEATHER_ENABLED: bool = True
+
+    # Proactive message frequency control
+    PROACTIVE_MAX_PER_DAY: int = 2
+    PROACTIVE_MIN_GAP_HOURS: int = 8
+    PROACTIVE_SILENCE_START: int = 21  # 21:00 — no triggers after this hour
+    PROACTIVE_SILENCE_END: int = 8     # 08:00 — no triggers before this hour
 
     # Application
     APP_ENV: str = "development"
