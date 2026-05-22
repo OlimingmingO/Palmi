@@ -61,8 +61,8 @@ export default function ConversationBrowser() {
   const [searching, setSearching] = useState(false)
 
   useEffect(() => {
-    apiGet<Elder[]>('/api/admin/elders')
-      .then(setElders)
+    apiGet<{items: Elder[], total: number}>('/api/admin/elders')
+      .then((data) => setElders(data.items))
       .catch(() => setError('加载用户列表失败'))
       .finally(() => setLoading((p) => ({ ...p, elders: false })))
   }, [])
@@ -73,8 +73,8 @@ export default function ConversationBrowser() {
     setMessages([])
     setSearchResults(null)
     setLoading((p) => ({ ...p, dates: true }))
-    apiGet<{ dates: DateEntry[] }>(`/api/admin/elders/${elder.id}/conversations`)
-      .then((data) => setDates(data.dates))
+    apiGet<{ items: DateEntry[] }>(`/api/admin/elders/${elder.id}/conversations`)
+      .then((data) => setDates(data.items))
       .catch(() => setDates([]))
       .finally(() => setLoading((p) => ({ ...p, dates: false })))
   }, [])
@@ -92,8 +92,8 @@ export default function ConversationBrowser() {
   function handleSearch() {
     if (!searchQuery.trim()) { setSearchResults(null); return }
     setSearching(true)
-    apiGet<{ results: SearchResult[] }>(`/api/admin/conversations/search?q=${encodeURIComponent(searchQuery)}`)
-      .then((data) => setSearchResults(data.results))
+    apiGet<{ items: SearchResult[] }>(`/api/admin/conversations/search?q=${encodeURIComponent(searchQuery)}`)
+      .then((data) => setSearchResults(data.items))
       .catch(() => setSearchResults([]))
       .finally(() => setSearching(false))
   }

@@ -3,7 +3,7 @@ import { apiGet, apiPatch } from '../api/client'
 
 interface TagEntry {
   id: number
-  tag: string
+  tag_name: string
   confidence: number
   source: string
   message_content: string
@@ -31,8 +31,8 @@ export default function TagManagement() {
   const fetchTags = useCallback(() => {
     setLoading(true)
     setError('')
-    apiGet<{ tags: TagEntry[]; total: number }>(`/api/admin/tags/review?page=${page}&page_size=${pageSize}`)
-      .then((data) => { setTags(data.tags); setTotal(data.total) })
+    apiGet<{ items: TagEntry[]; total: number }>(`/api/admin/tags/review?page=${page}&page_size=${pageSize}`)
+      .then((data) => { setTags(data.items); setTotal(data.total) })
       .catch(() => setError('数据加载失败'))
       .finally(() => setLoading(false))
   }, [page])
@@ -43,7 +43,7 @@ export default function TagManagement() {
     setSaving(true)
     try {
       await apiPatch(`/api/admin/tags/${tagId}`, { new_tag: editValue })
-      setTags((prev) => prev.map((t) => (t.id === tagId ? { ...t, tag: editValue } : t)))
+      setTags((prev) => prev.map((t) => (t.id === tagId ? { ...t, tag_name: editValue } : t)))
       setEditingId(null)
     } catch {
       alert('保存失败')
@@ -108,7 +108,7 @@ export default function TagManagement() {
                           ))}
                         </select>
                       ) : (
-                        <span className="inline-block px-2 py-0.5 bg-gray-100 rounded text-xs">{tag.tag}</span>
+                        <span className="inline-block px-2 py-0.5 bg-gray-100 rounded text-xs">{tag.tag_name}</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -135,7 +135,7 @@ export default function TagManagement() {
                         </div>
                       ) : (
                         <button
-                          onClick={() => { setEditingId(tag.id); setEditValue(tag.tag) }}
+                          onClick={() => { setEditingId(tag.id); setEditValue(tag.tag_name) }}
                           className="px-3 py-1 border border-gray-300 rounded text-xs hover:bg-gray-50"
                         >
                           编辑

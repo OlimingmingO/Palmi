@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react'
 import { apiGet, apiPatch } from '../api/client'
 
 interface Category {
-  category: string
+  need_category: string
   total_occurrences: number
-  elder_names: string[]
+  elder_count: number
+  elder_nicknames: string[]
 }
 
 interface NeedItem {
@@ -29,8 +30,8 @@ export default function UnmetNeeds() {
   function fetchCategories() {
     setLoading(true)
     setError('')
-    apiGet<{ categories: Category[] }>('/api/admin/unmet-needs')
-      .then((data) => setCategories(data.categories))
+    apiGet<{ items: Category[] }>('/api/admin/unmet-needs')
+      .then((data) => setCategories(data.items))
       .catch(() => setError('数据加载失败'))
       .finally(() => setLoading(false))
   }
@@ -45,8 +46,8 @@ export default function UnmetNeeds() {
     }
     setExpandedCat(cat)
     setNeedsLoading(true)
-    apiGet<{ needs: NeedItem[] }>(`/api/admin/unmet-needs?category=${encodeURIComponent(cat)}`)
-      .then((data) => setNeeds(data.needs))
+    apiGet<{ items: NeedItem[] }>(`/api/admin/unmet-needs?category=${encodeURIComponent(cat)}`)
+      .then((data) => setNeeds(data.items))
       .catch(() => setNeeds([]))
       .finally(() => setNeedsLoading(false))
   }
@@ -60,7 +61,7 @@ export default function UnmetNeeds() {
       if (expandedCat) {
         setCategories((prev) =>
           prev.map((c) =>
-            c.category === expandedCat
+            c.need_category === expandedCat
               ? { ...c, total_occurrences: c.total_occurrences - 1 }
               : c
           ).filter((c) => c.total_occurrences > 0)
@@ -92,16 +93,16 @@ export default function UnmetNeeds() {
       ) : (
         <div className="space-y-4">
           {categories.map((cat) => (
-            <div key={cat.category} className="bg-white rounded-lg shadow-sm border overflow-hidden">
+            <div key={cat.need_category} className="bg-white rounded-lg shadow-sm border overflow-hidden">
               {/* Category header */}
               <div
-                onClick={() => toggleCategory(cat.category)}
+                onClick={() => toggleCategory(cat.need_category)}
                 className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-gray-50"
               >
                 <div>
-                  <h3 className="font-semibold text-base">{cat.category}</h3>
+                  <h3 className="font-semibold text-base">{cat.need_category}</h3>
                   <p className="text-sm text-gray-500 mt-1">
-                    涉及用户: {cat.elder_names.join('、') || '-'}
+                    涉及用户: {cat.elder_nicknames.join('、') || '-'}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -109,13 +110,13 @@ export default function UnmetNeeds() {
                     {cat.total_occurrences} 次
                   </span>
                   <span className="text-gray-400 text-sm">
-                    {expandedCat === cat.category ? '▲' : '▼'}
+                    {expandedCat === cat.need_category ? '▲' : '▼'}
                   </span>
                 </div>
               </div>
 
               {/* Expanded needs list */}
-              {expandedCat === cat.category && (
+              {expandedCat === cat.need_category && (
                 <div className="border-t px-5 py-3">
                   {needsLoading ? (
                     <p className="text-gray-400 text-center py-4 text-sm">加载中...</p>
