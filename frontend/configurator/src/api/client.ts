@@ -12,7 +12,13 @@ export async function apiPost<T = unknown>(path: string, body: unknown): Promise
   })
   if (!res.ok) {
     const data = await res.json().catch(() => null)
-    throw new Error(data?.detail || `API error: ${res.status}`)
+    const detail = data?.detail
+    const message = typeof detail === 'string'
+      ? detail
+      : Array.isArray(detail)
+        ? detail.map((d: any) => d.msg).join('; ')
+        : `API error: ${res.status}`
+    throw new Error(message)
   }
   return res.json()
 }
@@ -26,7 +32,13 @@ export async function apiGet<T = unknown>(path: string): Promise<T> {
   })
   if (!res.ok) {
     const data = await res.json().catch(() => null)
-    throw new Error(data?.detail || `API error: ${res.status}`)
+    const detail = data?.detail
+    const message = typeof detail === 'string'
+      ? detail
+      : Array.isArray(detail)
+        ? detail.map((d: any) => d.msg).join('; ')
+        : `API error: ${res.status}`
+    throw new Error(message)
   }
   return res.json()
 }

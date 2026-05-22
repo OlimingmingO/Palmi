@@ -87,7 +87,7 @@ class CreateElderRequest(BaseModel):
     nickname: str = Field(..., min_length=1, max_length=64)
     profile_text: str = Field(..., min_length=1)
     contributor_relationship: str = Field(..., min_length=1, max_length=32)
-    contributor_name: str = Field(..., min_length=1, max_length=64)
+    contributor_name: str = Field(default="", max_length=64)
     contributor_phone: Optional[str] = Field(default=None, max_length=20)
 
 
