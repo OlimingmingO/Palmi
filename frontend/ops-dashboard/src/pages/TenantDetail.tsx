@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { apiGet } from '../api/client'
+import { apiGet, apiPatch } from '../api/client'
 
 interface ElderDetail {
   elder: {
@@ -55,6 +55,10 @@ export default function TenantDetail() {
   const [data, setData] = useState<ElderDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [bindId, setBindId] = useState('')
+  const [binding, setBinding] = useState(false)
+  const [bindError, setBindError] = useState('')
+  const [bindSuccess, setBindSuccess] = useState('')
 
   useEffect(() => {
     if (!id) return
@@ -64,6 +68,21 @@ export default function TenantDetail() {
       .catch(() => setError('数据加载失败'))
       .finally(() => setLoading(false))
   }, [id])
+
+  async function handleBind() {
+    setBinding(true)
+    setBindError('')
+    setBindSuccess('')
+    try {
+      await apiPatch(`/api/admin/elders/${id}/bind`, { wechat_user_id: bindId.trim() })
+      setBindSuccess('绑定成功！页面即将刷新...')
+      setTimeout(() => window.location.reload(), 1500)
+    } catch (err) {
+      setBindError(err instanceof Error ? err.message : '绑定失败')
+    } finally {
+      setBinding(false)
+    }
+  }
 
   function formatDate(dt: string | null) {
     if (!dt) return '-'
@@ -102,6 +121,43 @@ export default function TenantDetail() {
           查看完整对话
         </button>
       </div>
+
+      {/* Binding status */}
+      {elder.wechat_user_id.startsWith('web_') ? (
+        <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
+              未绑定企微
+            </span>
+            <span className="text-sm text-gray-500">该老人由配置者端创建，尚未关联企业微信账号</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={bindId}
+              onChange={(e) => setBindId(e.target.value)}
+              placeholder="输入企微用户ID (external_userid)"
+              className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm"
+            />
+            <button
+              onClick={handleBind}
+              disabled={binding || !bindId.trim()}
+              className="px-4 py-1.5 bg-primary-600 text-white text-sm rounded hover:bg-primary-700 disabled:opacity-50"
+            >
+              {binding ? '绑定中...' : '绑定'}
+            </button>
+          </div>
+          {bindError && <p className="text-red-500 text-xs mt-2">{bindError}</p>}
+          {bindSuccess && <p className="text-green-600 text-xs mt-2">{bindSuccess}</p>}
+        </div>
+      ) : (
+        <div className="mb-4 flex items-center gap-2">
+          <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">
+            已绑定企微
+          </span>
+          <span className="text-sm text-gray-400">{elder.wechat_user_id}</span>
+        </div>
+      )}
 
       {/* 6-zone grid */}
       <div className="grid grid-cols-2 gap-4">

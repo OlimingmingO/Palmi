@@ -14,6 +14,7 @@ Endpoints:
 - GET    /stats/dashboard                — Overview dashboard metrics
 - GET    /pke/{elder_id}/status          — PKE vault file counts
 """
+import logging
 import os
 import secrets
 import uuid
@@ -22,8 +23,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from pydantic import BaseModel
-from sqlalchemy import and_, cast, distinct, func, select
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, cast, distinct, func, select, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Date as SqlDate
 
@@ -32,9 +33,12 @@ from app.database import get_db
 from app.models.conversation import Conversation
 from app.models.elder import Elder
 from app.models.elder_profile import ElderProfile
+from app.models.pke_query_log import PkeQueryLog
 from app.models.tag import IntentTag, MessageTag, TagCorrection
 from app.models.trigger import TriggerLog
 from app.models.unmet_need import UnmetNeed
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +107,14 @@ def _uuid_str(value) -> Optional[str]:
     if value is None:
         return None
     return str(value)
+
+
+# ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
+
+class BindRequest(BaseModel):
+    wechat_user_id: str = Field(..., min_length=1, max_length=128, description="Real WeCom external_userid to bind")
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +321,116 @@ async def get_elder_detail(elder_id: str, db: AsyncSession = Depends(get_db)):
         "pke_status": pke_status,
         "config_status": config_status,
     }
+
+
+# ---------------------------------------------------------------------------
+# PATCH /elders/{elder_id}/bind
+# ---------------------------------------------------------------------------
+
+@router.patch("/elders/{elder_id}/bind")
+async def bind_elder_wecom(
+    elder_id: str,
+    body: BindRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: str = Depends(verify_ops_auth),
+):
+    """Manually bind a web-created elder to a real WeCom user ID.
+
+    If the target wechat_user_id already belongs to another elder (created
+    automatically when that WeCom user messaged), merge that elder's
+    conversations, tags, triggers, and unmet needs into this elder, then
+    archive the duplicate.
+    """
+    try:
+        elder_uuid = uuid.UUID(elder_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid elder_id format")
+
+    # Verify elder exists
+    elder = (await db.execute(select(Elder).where(Elder.id == elder_uuid))).scalar_one_or_none()
+    if elder is None:
+        raise HTTPException(status_code=404, detail="Elder not found")
+
+    # Must be a web-created elder (placeholder)
+    if not elder.wechat_user_id.startswith("web_"):
+        raise HTTPException(
+            status_code=400,
+            detail="This elder is already bound to a WeCom ID",
+        )
+
+    target_wechat_id = body.wechat_user_id.strip()
+
+    # Check if another elder already has this wechat_user_id
+    duplicate = (
+        await db.execute(
+            select(Elder).where(
+                Elder.wechat_user_id == target_wechat_id,
+                Elder.id != elder_uuid,
+            )
+        )
+    ).scalar_one_or_none()
+
+    merged_info = None
+    if duplicate:
+        # Move conversations
+        await db.execute(
+            sql_update(Conversation)
+            .where(Conversation.elder_id == duplicate.id)
+            .values(elder_id=elder.id)
+        )
+        # Move message tags
+        await db.execute(
+            sql_update(MessageTag)
+            .where(MessageTag.elder_id == duplicate.id)
+            .values(elder_id=elder.id)
+        )
+        # Move trigger logs
+        await db.execute(
+            sql_update(TriggerLog)
+            .where(TriggerLog.elder_id == duplicate.id)
+            .values(elder_id=elder.id)
+        )
+        # Move unmet needs
+        await db.execute(
+            sql_update(UnmetNeed)
+            .where(UnmetNeed.elder_id == duplicate.id)
+            .values(elder_id=elder.id)
+        )
+        # Move PKE query logs
+        await db.execute(
+            sql_update(PkeQueryLog)
+            .where(PkeQueryLog.elder_id == duplicate.id)
+            .values(elder_id=elder.id)
+        )
+
+        merged_info = {
+            "merged_elder_id": _uuid_str(duplicate.id),
+            "merged_nickname": duplicate.nickname,
+        }
+
+        # Archive the duplicate
+        duplicate.status = "archived"
+        duplicate.wechat_user_id = f"merged_{duplicate.wechat_user_id}"
+
+    # Bind the real WeCom ID
+    elder.wechat_user_id = target_wechat_id
+    await db.flush()
+
+    logger.info(
+        "Operator '%s' manually bound elder %s to WeCom user %s%s",
+        operator, elder.id, target_wechat_id,
+        f" (merged from {merged_info['merged_elder_id']})" if merged_info else "",
+    )
+
+    result = {
+        "id": _uuid_str(elder.id),
+        "nickname": elder.nickname,
+        "wechat_user_id": elder.wechat_user_id,
+        "bound": True,
+    }
+    if merged_info:
+        result["merged"] = merged_info
+    return result
 
 
 # ---------------------------------------------------------------------------
