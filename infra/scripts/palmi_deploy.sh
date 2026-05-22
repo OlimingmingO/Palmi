@@ -19,7 +19,7 @@ echo "[5/6] Rebuilding and restarting services..."
 cd /opt/Palmi
 docker-compose build
 docker-compose down
-docker-compose up -d postgres redis app celery-worker celery-beat
+docker-compose up -d postgres redis app celery-worker celery-beat scheduler ops-frontend configurator-frontend
 
 echo "[6/6] Running database migrations..."
 docker-compose exec -T app alembic upgrade head
