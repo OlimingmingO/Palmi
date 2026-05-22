@@ -13,11 +13,13 @@ import os
 import subprocess
 import asyncio
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from app.config import settings
+from app.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -71,20 +73,40 @@ class PKEService:
 
         Fail-open: returns empty string on timeout/error.
         1s outer timeout ensures dialogue is never blocked.
+
+        Every invocation (success, timeout, or error) is asynchronously
+        logged to the pke_query_logs table via a Celery task.
         """
         loop = asyncio.get_event_loop()
+        start_time = time.time()
+        result: str = ""
         try:
             result = await asyncio.wait_for(
                 loop.run_in_executor(None, self._run_use, elder_id, query_text),
                 timeout=1.0,  # 1s outer timeout (subprocess has its own)
             )
-            return result or ""
+            result = result or ""
+            return result
         except asyncio.TimeoutError:
             logger.warning("PKE query timeout for elder %s", elder_id)
-            return ""
+            result = ""
+            return result
         except Exception as e:
             logger.warning("PKE query error for elder %s: %s", elder_id, e)
-            return ""
+            result = ""
+            return result
+        finally:
+            latency_ms = int((time.time() - start_time) * 1000)
+            hit = bool(result and result.strip())
+            result_snippet = result[:200] if result else ""
+            # Fire-and-forget: never let logging break dialogue flow
+            try:
+                celery_app.send_task(
+                    "tasks.memory.log_pke_query",
+                    args=[elder_id, query_text, result_snippet, hit, latency_ms],
+                )
+            except Exception as log_exc:
+                logger.warning("Failed to enqueue PKE query log: %s", log_exc)
 
     def _run_use(self, elder_id: str, query_text: str) -> str:
         """Synchronous PKE use command (run in thread executor)."""

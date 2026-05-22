@@ -11,6 +11,8 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
+    environment:
+      - TZ=Asia/Shanghai
     depends_on:
       postgres:
         condition: service_healthy
@@ -27,6 +29,8 @@ services:
       dockerfile: Dockerfile
     container_name: palmi-celery-worker
     env_file: .env
+    environment:
+      - TZ=Asia/Shanghai
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,6 +47,8 @@ services:
       dockerfile: Dockerfile
     container_name: palmi-celery-beat
     env_file: .env
+    environment:
+      - TZ=Asia/Shanghai
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,6 +65,8 @@ services:
       dockerfile: Dockerfile
     container_name: palmi-scheduler
     env_file: .env
+    environment:
+      - TZ=Asia/Shanghai
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,6 +84,17 @@ services:
     container_name: palmi-ops-frontend
     ports:
       - "3000:3000"
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  configurator-frontend:
+    build:
+      context: ./frontend/configurator
+      dockerfile: Dockerfile
+    container_name: palmi-configurator-frontend
+    ports:
+      - "3001:3001"
     depends_on:
       - app
     restart: unless-stopped

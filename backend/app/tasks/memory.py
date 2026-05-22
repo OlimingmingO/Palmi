@@ -54,3 +54,25 @@ def compile_all_elders():
             compile_daily.delay(str(elder.id))
         except Exception as e:
             logger.error("Failed to queue compile for %s: %s", elder.id, e)
+
+
+@celery_app.task(bind=True, name="tasks.memory.log_pke_query", queue="low_priority", max_retries=1)
+def log_pke_query(self, elder_id: str, query_text: str, result_snippet: str, hit: bool, latency_ms: int):
+    """Log a PKE query to the database (fire-and-forget, non-blocking)."""
+    from app.database import sync_session_factory
+    from app.models.pke_query_log import PkeQueryLog
+
+    try:
+        with sync_session_factory() as db:
+            log_entry = PkeQueryLog(
+                elder_id=elder_id,
+                query_text=query_text,
+                result_snippet=result_snippet[:200] if result_snippet else None,
+                hit=hit,
+                latency_ms=latency_ms,
+            )
+            db.add(log_entry)
+            db.commit()
+    except Exception as exc:
+        logger.warning("Failed to log PKE query: %s", exc)
+        # Don't retry aggressively — this is observability, not critical path

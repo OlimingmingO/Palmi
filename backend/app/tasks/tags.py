@@ -137,6 +137,40 @@ async def _classify_async(elder_id: str, conversation_id: str) -> None:
             len(tag_results),
         )
 
+        # 6. Trigger unmet-needs detection for this user message
+        #    Find the assistant reply that immediately followed this user message.
+        try:
+            reply_stmt = (
+                select(Conversation)
+                .where(
+                    Conversation.elder_id == conversation.elder_id,
+                    Conversation.role == "assistant",
+                    Conversation.created_at >= conversation.created_at,
+                    Conversation.id != conversation.id,
+                )
+                .order_by(Conversation.created_at.asc())
+                .limit(1)
+            )
+            reply_result = await session.execute(reply_stmt)
+            bot_reply_row = reply_result.scalar_one_or_none()
+
+            if bot_reply_row is not None:
+                from app.tasks.unmet import detect_unmet_need
+
+                detect_unmet_need.delay(
+                    str(conversation.elder_id),
+                    str(conversation.id),
+                    user_content,
+                    bot_reply_row.content,
+                )
+            else:
+                logger.debug(
+                    "classify_tags: no assistant reply yet for %s, skipping unmet detection",
+                    conversation_id,
+                )
+        except Exception as _unmet_err:
+            logger.warning("Failed to queue unmet-need detection: %s", _unmet_err)
+
 
 def _parse_classification_response(raw: str) -> list[tuple[str, float]]:
     """Parse LLM JSON response into list of (tag_name, confidence) tuples.

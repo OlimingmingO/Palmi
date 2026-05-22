@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     PROACTIVE_SILENCE_START: int = 21  # 21:00 — no triggers after this hour
     PROACTIVE_SILENCE_END: int = 8     # 08:00 — no triggers before this hour
 
+    # Ops console auth
+    OPS_AUTH_USER: str = "admin"
+    OPS_AUTH_PASS: str = "palmi2026"
+
+    # Configurator auth
+    CONFIGURATOR_PASSWORD: str = "palmi_config_2026"
+
     # Application
     APP_ENV: str = "development"
     APP_HOST: str = "0.0.0.0"
