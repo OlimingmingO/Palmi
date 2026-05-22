@@ -423,12 +423,14 @@ async def get_elder_conversations(
 
 @router.get("/conversations/search")
 async def search_conversations(
-    q: str = Query(..., min_length=1),
+    q: str = Query(...),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
     """Full-text search across all conversation messages (SQL ILIKE for MVP)."""
+    if not q or not q.strip():
+        return {"items": [], "total": 0}
     pattern = f"%{q}%"
     offset = (page - 1) * page_size
 
