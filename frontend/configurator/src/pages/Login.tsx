@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Login() {
+  const [loginName, setLoginName] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -14,7 +15,7 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
-      await login(password)
+      await login(loginName, password)
       navigate('/', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败')
@@ -30,18 +31,29 @@ export default function Login() {
           小伴 · 配置者端
         </h1>
         <p className="text-sm text-center text-gray-500 mb-8">
-          请输入配置密码以继续
+          请输入用户名和密码以继续
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <input
+              type="text"
+              value={loginName}
+              onChange={(e) => setLoginName(e.target.value)}
+              placeholder="用户名"
+              className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition"
+              autoFocus
+              autoComplete="username"
+            />
+          </div>
+          <div>
+            <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="配置密码"
+              placeholder="密码"
               className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition"
-              autoFocus
+              autoComplete="current-password"
             />
           </div>
 
@@ -51,7 +63,7 @@ export default function Login() {
 
           <button
             type="submit"
-            disabled={loading || !password}
+            disabled={loading || !loginName || !password}
             className="w-full py-3 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? '验证中...' : '进入配置'}

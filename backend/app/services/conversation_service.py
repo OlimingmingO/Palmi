@@ -13,6 +13,7 @@ async def save_message(
     elder_id: uuid.UUID,
     role: str,
     content: str,
+    channel: Optional[str] = None,
 ) -> Conversation:
     """Persist a conversation message to the database.
 
@@ -21,6 +22,7 @@ async def save_message(
         elder_id: UUID of the elder
         role: 'user' or 'assistant'
         content: Message text
+        channel: Source channel (e.g. 'wecom_kf', 'ilink', 'wecom_app')
 
     Returns:
         The created Conversation record
@@ -30,6 +32,7 @@ async def save_message(
         elder_id=elder_id,
         role=role,
         content=content,
+        channel=channel,
     )
     db.add(msg)
     await db.flush()

@@ -29,7 +29,6 @@ export default function Confirmation() {
         `/api/configurator/elders/${elderId}/profile`,
         {
           profile_text: additionalText.trim(),
-          contributor_relationship: '',
         }
       )
       setUpdatedSummary(data.summary)

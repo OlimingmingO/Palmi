@@ -3,41 +3,53 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { apiGet, apiPatch } from '../api/client'
 
+interface ConfiguratorInfo {
+  id: string
+  nickname: string
+  relationship: string
+  phone: string | null
+  is_primary: boolean
+  created_at: string
+}
+
 interface ElderDetail {
-  elder: {
-    id: number
-    wechat_user_id: string
-    nickname: string
-    status: string
-    created_at: string
-  }
+  id: string
+  nickname: string
+  wechat_user_id: string
+  phone: string | null
+  status: string
+  engagement_status: string
+  created_at: string
   conversation_stats: {
     total_messages: number
     total_sessions: number
     weekly_messages: number
     avg_daily_messages: number
-    recent_messages: { content: string; role: string; created_at: string }[]
+    recent_messages: { id: string; role: string; preview: string; created_at: string }[]
   }
   tag_distribution: Record<string, number>
   trigger_history: {
-    id: number
+    id: string
     trigger_type: string
     status: string
-    trigger_reason: string
-    triggered_at: string
+    reason: string
+    skip_reason: string | null
+    created_at: string
   }[]
   pke_status: {
-    raw_count: number
-    wiki_count: number
-    last_raw_modified: string | null
-    last_wiki_modified: string | null
+    raw_file_count: number
+    wiki_file_count: number
+    raw_last_modified: string | null
+    wiki_last_modified: string | null
   }
   config_status: {
     has_profile: boolean
     version: number | null
     last_updated_by: string | null
     updated_at: string | null
-  }
+    content: string | null
+  } | null
+  configurators: ConfiguratorInfo[]
 }
 
 const PIE_COLORS = ['#0ea5e9', '#22c55e', '#eab308', '#ef4444', '#8b5cf6', '#f97316', '#ec4899', '#14b8a6', '#6366f1']
@@ -99,7 +111,7 @@ export default function TenantDetail() {
     )
   }
 
-  const { elder, conversation_stats, tag_distribution, trigger_history, pke_status, config_status } = data
+  const { conversation_stats, tag_distribution, trigger_history, pke_status, config_status, configurators } = data
 
   const pieData = Object.entries(tag_distribution)
     .map(([name, value]) => ({ name, value }))
@@ -110,9 +122,9 @@ export default function TenantDetail() {
       {/* Header */}
       <div className="flex items-center gap-4 mb-6">
         <button onClick={() => navigate(-1)} className="text-gray-500 hover:text-gray-700 text-sm">&larr; 返回</button>
-        <h2 className="text-2xl font-bold">{elder.nickname}</h2>
-        <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusBadge[elder.status] || 'bg-gray-100 text-gray-700'}`}>
-          {elder.status}
+        <h2 className="text-2xl font-bold">{data.nickname}</h2>
+        <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusBadge[data.status] || 'bg-gray-100 text-gray-700'}`}>
+          {data.status}
         </span>
         <button
           onClick={() => navigate('/conversations')}
@@ -123,7 +135,7 @@ export default function TenantDetail() {
       </div>
 
       {/* Binding status */}
-      {elder.wechat_user_id.startsWith('web_') ? (
+      {data.wechat_user_id.startsWith('web_') ? (
         <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
           <div className="flex items-center gap-2 mb-2">
             <span className="px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
@@ -155,20 +167,34 @@ export default function TenantDetail() {
           <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">
             已绑定企微
           </span>
-          <span className="text-sm text-gray-400">{elder.wechat_user_id}</span>
+          <span className="text-sm text-gray-400">{data.wechat_user_id}</span>
         </div>
       )}
 
       {/* 6-zone grid */}
       <div className="grid grid-cols-2 gap-4">
-        {/* 1. Basic Info */}
+        {/* 1. Basic Info — Identity */}
         <div className="bg-white rounded-lg shadow-sm border p-5">
-          <h3 className="font-semibold text-gray-700 mb-3">基本信息</h3>
+          <h3 className="font-semibold text-gray-700 mb-3">用户身份信息</h3>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between"><dt className="text-gray-500">ID</dt><dd>{elder.id}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">微信ID</dt><dd className="truncate max-w-[200px]">{elder.wechat_user_id}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">状态</dt><dd>{elder.status}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">创建时间</dt><dd>{formatDate(elder.created_at)}</dd></div>
+            <div className="flex justify-between"><dt className="text-gray-500">昵称</dt><dd className="font-medium">{data.nickname}</dd></div>
+            <div className="flex justify-between"><dt className="text-gray-500">系统ID</dt><dd className="text-xs text-gray-400 truncate max-w-[180px]">{data.id}</dd></div>
+            <div className="flex justify-between">
+              <dt className="text-gray-500">企微用户ID</dt>
+              <dd className="truncate max-w-[180px] text-xs font-mono">{data.wechat_user_id}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-gray-500">绑定状态</dt>
+              <dd>
+                {data.wechat_user_id.startsWith('web_') ? (
+                  <span className="px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded">未绑定</span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded">已绑定</span>
+                )}
+              </dd>
+            </div>
+            <div className="flex justify-between"><dt className="text-gray-500">活跃状态</dt><dd>{data.engagement_status}</dd></div>
+            <div className="flex justify-between"><dt className="text-gray-500">创建时间</dt><dd>{formatDate(data.created_at)}</dd></div>
           </dl>
         </div>
 
@@ -202,7 +228,7 @@ export default function TenantDetail() {
                     <span className={`font-medium ${msg.role === 'user' ? 'text-primary-600' : 'text-gray-400'}`}>
                       {msg.role === 'user' ? '用户' : '小伴'}
                     </span>
-                    <span className="truncate">{msg.content}</span>
+                    <span className="truncate">{msg.preview}</span>
                   </div>
                 ))}
               </div>
@@ -252,13 +278,14 @@ export default function TenantDetail() {
                       <td className="py-1.5">{t.trigger_type}</td>
                       <td className="py-1.5">
                         <span className={`px-1.5 py-0.5 rounded text-xs ${
-                          t.status === 'completed' ? 'bg-green-50 text-green-600' :
+                          t.status === 'sent' ? 'bg-green-50 text-green-600' :
                           t.status === 'failed' ? 'bg-red-50 text-red-600' :
+                          t.status === 'skipped' ? 'bg-yellow-50 text-yellow-600' :
                           'bg-gray-100 text-gray-600'
                         }`}>{t.status}</span>
                       </td>
-                      <td className="py-1.5 text-gray-500 max-w-[150px] truncate" title={t.trigger_reason}>{t.trigger_reason}</td>
-                      <td className="py-1.5 text-gray-400">{formatDate(t.triggered_at)}</td>
+                      <td className="py-1.5 text-gray-500 max-w-[150px] truncate" title={t.reason}>{t.reason}</td>
+                      <td className="py-1.5 text-gray-400">{formatDate(t.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -271,29 +298,68 @@ export default function TenantDetail() {
         <div className="bg-white rounded-lg shadow-sm border p-5">
           <h3 className="font-semibold text-gray-700 mb-3">PKE 状态</h3>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between"><dt className="text-gray-500">原始文件数</dt><dd className="font-medium">{pke_status.raw_count}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">Wiki 文件数</dt><dd className="font-medium">{pke_status.wiki_count}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">最后采集时间</dt><dd>{formatDate(pke_status.last_raw_modified)}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">最后编译时间</dt><dd>{formatDate(pke_status.last_wiki_modified)}</dd></div>
+            <div className="flex justify-between"><dt className="text-gray-500">原始文件数</dt><dd className="font-medium">{pke_status.raw_file_count}</dd></div>
+            <div className="flex justify-between"><dt className="text-gray-500">Wiki 文件数</dt><dd className="font-medium">{pke_status.wiki_file_count}</dd></div>
+            <div className="flex justify-between"><dt className="text-gray-500">最后采集时间</dt><dd>{formatDate(pke_status.raw_last_modified)}</dd></div>
+            <div className="flex justify-between"><dt className="text-gray-500">最后编译时间</dt><dd>{formatDate(pke_status.wiki_last_modified)}</dd></div>
           </dl>
         </div>
 
-        {/* 6. Config Status */}
+        {/* 6. Configuration Info */}
         <div className="bg-white rounded-lg shadow-sm border p-5">
-          <h3 className="font-semibold text-gray-700 mb-3">配置状态</h3>
-          <dl className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-gray-500">已配置档案</dt>
-              <dd>
-                <span className={`px-2 py-0.5 rounded text-xs font-medium ${config_status.has_profile ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-                  {config_status.has_profile ? '是' : '否'}
-                </span>
-              </dd>
+          <h3 className="font-semibold text-gray-700 mb-3">配置信息</h3>
+
+          {/* Configurator(s) list */}
+          {configurators && configurators.length > 0 ? (
+            <div className="mb-4">
+              <p className="text-xs font-medium text-gray-500 mb-2">配置者</p>
+              <div className="space-y-2">
+                {configurators.map((c) => (
+                  <div key={c.id} className="flex items-center gap-2 p-2 bg-gray-50 rounded text-sm">
+                    <span className="font-medium">{c.nickname || '未命名'}</span>
+                    <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 text-xs rounded">{c.relationship}</span>
+                    {c.is_primary && <span className="px-1.5 py-0.5 bg-orange-50 text-orange-600 text-xs rounded">主要联系人</span>}
+                    {c.phone && <span className="text-gray-400 text-xs">{c.phone}</span>}
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="flex justify-between"><dt className="text-gray-500">版本</dt><dd>{config_status.version ?? '-'}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">最后更新者</dt><dd>{config_status.last_updated_by ?? '-'}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">更新时间</dt><dd>{formatDate(config_status.updated_at)}</dd></div>
-          </dl>
+          ) : (
+            <p className="text-gray-400 text-sm mb-4">暂无配置者信息</p>
+          )}
+
+          {/* Profile version info */}
+          {config_status && config_status.has_profile ? (
+            <div>
+              <div className="flex items-center gap-3 mb-2 text-xs text-gray-500">
+                <span>版本 v{config_status.version}</span>
+                <span>·</span>
+                <span>由 {config_status.last_updated_by} 更新</span>
+                <span>·</span>
+                <span>{formatDate(config_status.updated_at)}</span>
+              </div>
+              {/* Profile content */}
+              {config_status.content && (
+                <div className="mt-2 p-3 bg-gray-50 rounded border text-xs text-gray-700 max-h-[200px] overflow-auto whitespace-pre-wrap">
+                  {config_status.content}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-gray-400 text-sm">暂无档案配置</p>
+          )}
+
+          {/* Linkage indicator */}
+          {configurators && configurators.length > 0 && (
+            <div className="mt-3 pt-3 border-t text-xs text-gray-500">
+              <span>关联关系：</span>
+              <span className="font-medium text-gray-700">{data.nickname}</span>
+              <span className="mx-1">←</span>
+              <span>由 </span>
+              <span className="font-medium text-blue-600">{configurators[0].nickname || '配置者'}</span>
+              <span>（{configurators[0].relationship}）配置</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -31,10 +31,12 @@ async def _send_greetings():
     """Async implementation of morning greeting dispatch."""
     from app.database import async_session_factory
     from app.models.elder import Elder
+    from app.models.trigger import TriggerState
     from app.services.dialogue import generate_greeting
     from app.gateway.wecom_api import send_text_message
     from app.pke.pke_service import pke_service
     from sqlalchemy import select
+    from datetime import date, datetime, timezone
 
     async with async_session_factory() as session:
         stmt = select(Elder).where(Elder.status == "active")
@@ -54,6 +56,28 @@ async def _send_greetings():
             # Send via WeCom
             await send_text_message(user_id=elder.wechat_user_id, content=greeting)
             logger.debug("Sent greeting to elder %s", elder.id)
+
+            # Increment daily trigger count (morning greeting counts toward quota)
+            async with async_session_factory() as session:
+                stmt = select(TriggerState).where(TriggerState.elder_id == elder.id)
+                result = await session.execute(stmt)
+                state = result.scalar_one_or_none()
+                today = date.today()
+                if state is None:
+                    state = TriggerState(
+                        elder_id=elder.id,
+                        today_trigger_count=1,
+                        last_trigger_at=datetime.now(tz=timezone.utc),
+                        today_date=today,
+                    )
+                    session.add(state)
+                else:
+                    if state.today_date != today:
+                        state.today_trigger_count = 0
+                        state.today_date = today
+                    state.today_trigger_count += 1
+                    state.last_trigger_at = datetime.now(tz=timezone.utc)
+                await session.commit()
 
         except Exception as e:
             logger.error("Failed to greet elder %s: %s", elder.id, e)

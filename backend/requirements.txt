@@ -13,3 +13,4 @@ python-multipart>=0.0.9
 cryptography>=42.0
 chinese-calendar>=1.9.0
 openai>=1.40.0
+PyJWT>=2.8.0

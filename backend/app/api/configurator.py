@@ -3,18 +3,21 @@
 Mounted at `/api/configurator/...` (see `app/api/router.py`).
 
 Endpoints:
-- POST /auth/login                        — Simple password login
-- POST /elders                            — Create elder + initial understanding doc
-- GET  /elders/{elder_id}                 — Fetch elder + latest profile summary
-- POST /elders/{elder_id}/profile         — Append/merge new profile text
+- POST /auth/login                        — Login by login_name + shared password, returns JWT
+- POST /elders                            — Create elder + initial understanding doc (shared-password gated)
+- GET  /elders                            — List elders owned by the authenticated configurator
+- GET  /elders/{elder_id}                 — Fetch elder + latest profile summary (ownership-checked)
+- POST /elders/{elder_id}/profile         — Append/merge new profile text (ownership-checked)
 """
 from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+import jwt
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -39,11 +42,52 @@ router = APIRouter()
 
 # -------------------------- Auth --------------------------
 
-# For MVP we issue a single static bearer token equal to the configured password.
-# Subsequent requests must send it via either:
-#   - Header `X-Config-Token: <password>`
-#   - Header `Authorization: Bearer <password>`
-def _extract_token(x_config_token: Optional[str], authorization: Optional[str]) -> Optional[str]:
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_DAYS = 7
+
+
+def _create_jwt(configurator_id: uuid.UUID, elder_id: uuid.UUID) -> str:
+    """Sign a JWT carrying the configurator's identity and owned elder."""
+    payload = {
+        "sub": str(configurator_id),
+        "elder_id": str(elder_id),
+        "exp": datetime.now(tz=timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+async def get_current_configurator(
+    authorization: str = Header(..., alias="Authorization"),
+) -> dict:
+    """Extract configurator identity from a JWT Bearer token.
+
+    Returns a dict with `configurator_id` and `elder_id` (both as strings).
+    Raises 401 on any decode/format/expiry error.
+    """
+    try:
+        scheme, token = authorization.split(" ", 1)
+        if scheme.lower() != "bearer":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid auth scheme",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        return {
+            "configurator_id": payload["sub"],
+            "elder_id": payload["elder_id"],
+        }
+    except HTTPException:
+        raise
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, ValueError, KeyError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+def _extract_shared_token(x_config_token: Optional[str], authorization: Optional[str]) -> Optional[str]:
     if x_config_token:
         return x_config_token.strip()
     if authorization:
@@ -54,15 +98,16 @@ def _extract_token(x_config_token: Optional[str], authorization: Optional[str]) 
     return None
 
 
-async def verify_configurator_auth(
+async def verify_shared_password(
     x_config_token: Optional[str] = Header(default=None, alias="X-Config-Token"),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ) -> None:
-    """FastAPI dependency: enforces the shared configurator password.
+    """FastAPI dependency that enforces the shared configurator password.
 
-    Raises 401 if the supplied token does not match settings.CONFIGURATOR_PASSWORD.
+    Used only by the elder-creation endpoint where no Configurator account
+    exists yet (bootstrapping flow).
     """
-    token = _extract_token(x_config_token, authorization)
+    token = _extract_shared_token(x_config_token, authorization)
     if not token or token != settings.CONFIGURATOR_PASSWORD:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -71,10 +116,62 @@ async def verify_configurator_auth(
         )
 
 
+async def verify_jwt_or_shared_password(
+    x_config_token: Optional[str] = Header(default=None, alias="X-Config-Token"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict:
+    """Bootstrap-flow dependency accepting either a JWT or the shared password.
+
+    The configurator console previously used the shared password for elder
+    creation, but after JWT migration the frontend sends `Authorization:
+    Bearer <jwt>` for logged-in users. This dependency tries JWT first, then
+    falls back to the shared password (still required for first-time bootstrap
+    where no Configurator account exists yet).
+    """
+    # 1) Try JWT path first.
+    if authorization:
+        value = authorization.strip()
+        if value.lower().startswith("bearer "):
+            token = value[7:].strip()
+            try:
+                payload = jwt.decode(
+                    token, settings.SECRET_KEY, algorithms=["HS256"]
+                )
+                return {
+                    "auth": "jwt",
+                    "configurator_id": payload["sub"],
+                    "elder_id": payload.get("elder_id"),
+                }
+            except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, KeyError):
+                # Fall through to shared-password check.
+                pass
+
+    # 2) Fall back to shared-password check (X-Config-Token or raw Bearer).
+    shared_token = _extract_shared_token(x_config_token, authorization)
+    if shared_token and shared_token == settings.CONFIGURATOR_PASSWORD:
+        return {"auth": "shared_password"}
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or missing configurator credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _ensure_owns_elder(elder_id: str, current_user: dict) -> None:
+    """Raise 403 unless the JWT-authenticated user owns the given elder."""
+    if str(elder_id) != current_user.get("elder_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this elder",
+        )
+
+
 # -------------------------- Schemas --------------------------
 
 
 class LoginRequest(BaseModel):
+    login_name: str = Field(..., min_length=1, max_length=128)
     password: str = Field(..., min_length=1, max_length=128)
 
 
@@ -84,11 +181,16 @@ class LoginResponse(BaseModel):
 
 
 class CreateElderRequest(BaseModel):
-    nickname: str = Field(..., min_length=1, max_length=64)
-    profile_text: str = Field(..., min_length=1)
+    nickname: str = Field(default="", max_length=64)
+    profile_text: str = Field(default="", max_length=10000)
     contributor_relationship: str = Field(..., min_length=1, max_length=32)
     contributor_name: str = Field(default="", max_length=64)
     contributor_phone: Optional[str] = Field(default=None, max_length=20)
+    login_name: Optional[str] = Field(
+        default=None,
+        max_length=128,
+        description="Login identifier for the configurator account; required for subsequent JWT-based login.",
+    )
 
 
 class CreateElderResponse(BaseModel):
@@ -109,13 +211,26 @@ class ElderDetailResponse(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     profile_text: str = Field(..., min_length=1)
-    contributor_relationship: str = Field(..., min_length=1, max_length=32)
+    contributor_relationship: str = Field(default="", max_length=32)
 
 
 class UpdateProfileResponse(BaseModel):
     elder_id: str
     summary: str
     understanding_doc_version: int
+
+
+class ElderListItem(BaseModel):
+    elder_id: str
+    nickname: Optional[str]
+    status: str
+    created_at: str
+    profile_version: Optional[int] = None
+
+
+class ElderListResponse(BaseModel):
+    items: list[ElderListItem]
+    total: int
 
 
 # -------------------------- Helpers --------------------------
@@ -158,35 +273,95 @@ def _parse_elder_id(elder_id: str) -> uuid.UUID:
 # -------------------------- Endpoints --------------------------
 
 
-@router.post("/auth/login", response_model=LoginResponse)
-async def login(payload: LoginRequest) -> LoginResponse:
-    """Validate the shared configurator password and return a bearer token.
+@router.get(
+    "/elders",
+    response_model=ElderListResponse,
+)
+async def list_elders(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_configurator),
+) -> ElderListResponse:
+    """List elders owned by the authenticated configurator."""
+    try:
+        owned_elder_id = uuid.UUID(current_user["elder_id"])
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
 
-    The token is simply the configured password — clients should send it back
-    as `X-Config-Token` or `Authorization: Bearer <token>` on subsequent calls.
+    stmt = (
+        select(Elder)
+        .where(Elder.id == owned_elder_id)
+        .order_by(Elder.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    elders = result.scalars().all()
+
+    items = []
+    for elder in elders:
+        profile = await _latest_profile(db, elder.id)
+        items.append(ElderListItem(
+            elder_id=str(elder.id),
+            nickname=elder.nickname,
+            status=elder.status,
+            created_at=elder.created_at.isoformat() if elder.created_at else "",
+            profile_version=profile.version if profile else None,
+        ))
+
+    return ElderListResponse(items=items, total=len(items))
+
+
+@router.post("/auth/login", response_model=LoginResponse)
+async def login(
+    payload: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+) -> LoginResponse:
+    """Validate the shared password + look up Configurator by login_name.
+
+    On success, issue a JWT (HS256, 7-day expiry) carrying the configurator's
+    id and the elder_id they own. Subsequent requests must send it as
+    `Authorization: Bearer <jwt>`.
     """
     if payload.password != settings.CONFIGURATOR_PASSWORD:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect password",
         )
-    return LoginResponse(token=settings.CONFIGURATOR_PASSWORD, message="Login successful")
+
+    stmt = select(Configurator).where(Configurator.login_name == payload.login_name.strip())
+    result = await db.execute(stmt)
+    configurator = result.scalar_one_or_none()
+    if configurator is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Configurator not found for the given login_name",
+        )
+
+    token = _create_jwt(configurator.id, configurator.elder_id)
+    return LoginResponse(token=token, message="Login successful")
 
 
 @router.post(
     "/elders",
     response_model=CreateElderResponse,
-    dependencies=[Depends(verify_configurator_auth)],
 )
 async def create_elder(
     payload: CreateElderRequest,
     db: AsyncSession = Depends(get_db),
+    credentials: dict = Depends(verify_jwt_or_shared_password),
 ) -> CreateElderResponse:
     """Create a new elder + initial understanding document.
 
+    This is the bootstrap flow: it is gated by the shared configurator
+    password (no Configurator account exists yet for the caller). The newly
+    created Configurator's `login_name` is what the user will use on the
+    JWT-based login endpoint afterwards.
+
     Steps:
     1. Insert Elder (with placeholder wechat_user_id since not from WeChat yet).
-    2. Insert Configurator linked to the elder.
+    2. Insert Configurator linked to the elder (using supplied login_name when
+       provided; otherwise a generated one).
     3. Generate understanding doc + summary via LLM.
     4. Persist ElderProfile (version=1).
     5. Initialize PKE vault and seed it with the understanding doc.
@@ -201,9 +376,22 @@ async def create_elder(
     db.add(elder)
     await db.flush()  # populate elder.id
 
+    supplied_login_name = (payload.login_name or "").strip()
+    if supplied_login_name:
+        existing_stmt = select(Configurator).where(Configurator.login_name == supplied_login_name)
+        existing_result = await db.execute(existing_stmt)
+        if existing_result.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="login_name already in use",
+            )
+        login_name_value = supplied_login_name
+    else:
+        login_name_value = f"{placeholder_wechat_id}_{uuid.uuid4().hex[:8]}"
+
     configurator = Configurator(
         elder_id=elder.id,
-        login_name=f"{placeholder_wechat_id}_{uuid.uuid4().hex[:8]}",
+        login_name=login_name_value,
         nickname=payload.contributor_name.strip(),
         relationship=payload.contributor_relationship.strip(),
         phone=(payload.contributor_phone or "").strip() or None,
@@ -246,13 +434,14 @@ async def create_elder(
 @router.get(
     "/elders/{elder_id}",
     response_model=ElderDetailResponse,
-    dependencies=[Depends(verify_configurator_auth)],
 )
 async def get_elder(
     elder_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_configurator),
 ) -> ElderDetailResponse:
     """Return elder basic info plus the latest profile version + summary."""
+    _ensure_owns_elder(elder_id, current_user)
     eid = _parse_elder_id(elder_id)
     elder = await db.get(Elder, eid)
     if elder is None:
@@ -285,17 +474,18 @@ async def get_elder(
 @router.post(
     "/elders/{elder_id}/profile",
     response_model=UpdateProfileResponse,
-    dependencies=[Depends(verify_configurator_auth)],
 )
 async def append_profile(
     elder_id: str,
     payload: UpdateProfileRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_configurator),
 ) -> UpdateProfileResponse:
     """Append/merge new configurator-supplied text into the latest understanding doc.
 
     Stores the result as a new ElderProfile row with version = previous + 1.
     """
+    _ensure_owns_elder(elder_id, current_user)
     eid = _parse_elder_id(elder_id)
     elder = await db.get(Elder, eid)
     if elder is None:

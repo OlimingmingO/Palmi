@@ -43,8 +43,8 @@ class Settings(BaseSettings):
     # Proactive message frequency control
     PROACTIVE_MAX_PER_DAY: int = 2
     PROACTIVE_MIN_GAP_HOURS: int = 8
-    PROACTIVE_SILENCE_START: int = 21  # 21:00 — no triggers after this hour
-    PROACTIVE_SILENCE_END: int = 8     # 08:00 — no triggers before this hour
+    PROACTIVE_SILENCE_START: int = 22  # 22:00 — no triggers after this hour
+    PROACTIVE_SILENCE_END: int = 7     # 07:00 — no triggers before this hour
 
     # Ops console auth
     OPS_AUTH_USER: str = "admin"
@@ -52,6 +52,14 @@ class Settings(BaseSettings):
 
     # Configurator auth
     CONFIGURATOR_PASSWORD: str = "palmi_config_2026"
+    # IMPORTANT: Override via SECRET_KEY env var in production
+    SECRET_KEY: str = "palmi_dev_secret_change_in_production"  # JWT signing key
+
+    # iLink Bot (Personal WeChat)
+    ILINK_ACCOUNT_ID: str = ""
+    ILINK_BOT_TOKEN: str = ""
+    ILINK_BASE_URL: str = "https://ilinkai.weixin.qq.com"
+    ILINK_ENABLED: bool = False
 
     # Application
     APP_ENV: str = "development"

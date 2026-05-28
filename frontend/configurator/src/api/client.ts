@@ -6,7 +6,7 @@ export async function apiPost<T = unknown>(path: string, body: unknown): Promise
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { 'X-Config-Token': token } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
   })
@@ -27,7 +27,7 @@ export async function apiGet<T = unknown>(path: string): Promise<T> {
   const token = localStorage.getItem('config_token')
   const res = await fetch(`${API_BASE}${path}`, {
     headers: {
-      ...(token ? { 'X-Config-Token': token } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   })
   if (!res.ok) {

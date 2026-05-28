@@ -47,6 +47,9 @@ def parse_callback_message(decrypted_xml: str) -> dict:
         # Event-specific fields (only populated for msg_type == "event")
         "event": (root.findtext("Event") or "").lower() if msg_type == "event" else "",
         "event_key": root.findtext("EventKey", "") if msg_type == "event" else "",
+        # KF (Customer Service) event fields — present in kf_msg_or_event notifications
+        "open_kf_id": root.findtext("OpenKfId", ""),
+        "kf_token": root.findtext("Token", ""),
     }
 
 

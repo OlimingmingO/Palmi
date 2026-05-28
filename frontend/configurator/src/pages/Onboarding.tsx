@@ -20,8 +20,8 @@ export default function Onboarding() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!nickname.trim() || !profileText.trim()) {
-      setError('请填写老人昵称和介绍信息')
+    if (!nickname.trim() && !profileText.trim()) {
+      setError('请至少填写老人昵称或介绍信息')
       return
     }
     setError('')

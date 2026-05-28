@@ -85,14 +85,12 @@ def detect_unmet_need(self, elder_id: str, conversation_id: str, user_message: s
             ).scalars().first()
 
             if existing:
-                # Increment count
-                existing.occurrence_count += 1
+                # Dedup hit — same elder+category within 7 days; do NOT inflate count (PRD AC-5)
                 existing.updated_at = datetime.utcnow()
                 logger.info(
-                    "Incremented unmet need count for %s/%s to %d",
+                    "Dedup hit for unmet need %s/%s — skipping count increment",
                     elder_id,
                     result["category"],
-                    existing.occurrence_count,
                 )
             else:
                 # Create new

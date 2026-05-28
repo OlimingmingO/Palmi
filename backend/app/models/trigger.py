@@ -39,6 +39,7 @@ class TriggerState(Base):
     elder_id = Column(UUID(as_uuid=True), ForeignKey("elders.id", ondelete="CASCADE"), primary_key=True)
     today_trigger_count = Column(Integer, nullable=False, default=0)
     last_trigger_at = Column(DateTime(timezone=True), nullable=True)
+    last_message_read = Column(Boolean, nullable=False, default=True, server_default="true")
     today_date = Column(Date, nullable=False, server_default=func.current_date())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

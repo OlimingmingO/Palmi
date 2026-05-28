@@ -50,6 +50,41 @@ async def get_access_token() -> str:
         return _access_token
 
 
+# KF Token cache (separate from app token — different secret)
+_kf_access_token: Optional[str] = None
+_kf_token_expires_at: float = 0
+
+
+async def get_kf_access_token() -> str:
+    """Get WeCom KF (Customer Service) access token, refreshing if expired.
+
+    Uses WECOM_SECRET (KF API auth uses the bound app's secret).
+    """
+    global _kf_access_token, _kf_token_expires_at
+
+    if _kf_access_token and time.time() < _kf_token_expires_at - 300:
+        return _kf_access_token
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            "https://qyapi.weixin.qq.com/cgi-bin/gettoken",
+            params={
+                "corpid": settings.WECOM_CORP_ID,
+                "corpsecret": settings.WECOM_SECRET,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("errcode", 0) != 0:
+            raise RuntimeError(f"WeCom KF token error: {data.get('errmsg', 'unknown')}")
+
+        _kf_access_token = data["access_token"]
+        _kf_token_expires_at = time.time() + data.get("expires_in", 7200)
+        logger.info("WeCom KF access token refreshed, expires in %ds", data.get("expires_in", 7200))
+        return _kf_access_token
+
+
 async def send_text_message(user_id: str, content: str) -> dict:
     """Send a text message to a WeCom user.
 

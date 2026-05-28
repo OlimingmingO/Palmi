@@ -49,9 +49,21 @@ CLASSIFICATION_SYSTEM_PROMPT = """你是一个对话意图分类器。
 confidence取值0.0-1.0，表示你对该分类的把握程度。"""
 
 
-def _build_classification_prompt(user_message: str) -> str:
-    """Build the user-turn prompt for intent classification."""
-    return f"请对以下老人发言进行意图分类：\n\n「{user_message}」"
+def _build_classification_prompt(user_message: str, context: list[tuple[str, str]] = None) -> str:
+    """Build the user-turn prompt for intent classification.
+
+    Args:
+        user_message: The current user message to classify.
+        context: Optional list of (role, content) tuples representing previous turns.
+    """
+    context_str = ""
+    if context:
+        context_str = "以下是前几轮对话上下文：\n"
+        for role, content in context:
+            label = "老人" if role == "user" else "小伴"
+            context_str += f"{label}：{content}\n"
+        context_str += "\n"
+    return f"{context_str}请对以下老人发言进行意图分类：\n\n「{user_message}」"
 
 
 async def _classify_async(elder_id: str, conversation_id: str) -> None:
@@ -84,10 +96,24 @@ async def _classify_async(elder_id: str, conversation_id: str) -> None:
             logger.debug("classify_tags: empty content for %s", conversation_id)
             return
 
-        # 2. Build classification prompt and call LLM
+        # 2. Query previous 3 turns for context
+        context_stmt = (
+            select(Conversation)
+            .where(
+                Conversation.elder_id == conversation.elder_id,
+                Conversation.created_at < conversation.created_at,
+            )
+            .order_by(Conversation.created_at.desc())
+            .limit(3)
+        )
+        context_result = await session.execute(context_stmt)
+        context_rows = list(reversed(context_result.scalars().all()))
+        context = [(row.role, row.content) for row in context_rows] if context_rows else None
+
+        # 3. Build classification prompt and call LLM
         messages = [
             {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
-            {"role": "user", "content": _build_classification_prompt(user_content)},
+            {"role": "user", "content": _build_classification_prompt(user_content, context)},
         ]
 
         try:
@@ -100,18 +126,18 @@ async def _classify_async(elder_id: str, conversation_id: str) -> None:
             logger.error("LLM classification failed for %s: %s", conversation_id, e)
             return
 
-        # 3. Parse JSON response
+        # 4. Parse JSON response
         tag_results = _parse_classification_response(raw_response)
         if not tag_results:
             logger.warning("classify_tags: could not parse LLM response for %s: %s", conversation_id, raw_response[:200])
             return
 
-        # 4. Load tag ID mappings from DB
+        # 5. Load tag ID mappings from DB
         tag_stmt = select(IntentTag).where(IntentTag.is_active == True)
         tag_result = await session.execute(tag_stmt)
         tag_map = {tag.name: tag.id for tag in tag_result.scalars().all()}
 
-        # 5. Persist MessageTag records
+        # 6. Persist MessageTag records
         for tag_name, confidence in tag_results:
             tag_id = tag_map.get(tag_name)
             if tag_id is None:
@@ -137,7 +163,7 @@ async def _classify_async(elder_id: str, conversation_id: str) -> None:
             len(tag_results),
         )
 
-        # 6. Trigger unmet-needs detection for this user message
+        # 7. Trigger unmet-needs detection for this user message
         #    Find the assistant reply that immediately followed this user message.
         try:
             reply_stmt = (

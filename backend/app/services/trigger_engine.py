@@ -9,9 +9,8 @@ Phase 2: 4 trigger types evaluated in priority order:
 Frequency control:
   - Max PROACTIVE_MAX_PER_DAY (default 2) proactive messages per elder per day
   - Minimum PROACTIVE_MIN_GAP_HOURS (default 8) hours between messages
-  - Silence hours: PROACTIVE_SILENCE_START (21:00) to PROACTIVE_SILENCE_END (08:00)
-  - Note: the morning greeting from proactive.py counts as a separate daily message
-    and is NOT deducted from the trigger quota (triggers are supplementary)
+  - Silence hours: PROACTIVE_SILENCE_START (22:00) to PROACTIVE_SILENCE_END (07:00)
+  - The morning greeting counts toward the daily quota (2 total including greeting)
 """
 import logging
 import uuid
@@ -26,8 +25,8 @@ logger = logging.getLogger(__name__)
 # Default frequency control values (overridden by settings if available)
 _MAX_PER_DAY = 2
 _MIN_GAP_HOURS = 8
-_SILENCE_START = 21   # 21:00
-_SILENCE_END = 8      # 08:00
+_SILENCE_START = 22   # 22:00
+_SILENCE_END = 7      # 07:00
 
 
 def _get_settings():
@@ -74,6 +73,7 @@ class TriggerEngine:
                 elder_id=uuid.UUID(elder_id),
                 today_trigger_count=0,
                 last_trigger_at=None,
+                last_message_read=True,
                 today_date=date.today(),
             )
             db.add(state)
@@ -97,6 +97,12 @@ class TriggerEngine:
             skip_reason is empty if allowed is True.
         """
         max_per_day, min_gap_hours, _, _ = self._frequency_limits()
+
+        # 0. Unread-no-stack: skip if the elder hasn't read the last message
+        state = await self._get_or_create_state(db, elder_id)
+        if state.last_message_read is False:
+            logger.debug("Elder %s: trigger skipped — last message unread", elder_id)
+            return False, "last_message_unread"
 
         # 1. Check silence hours
         if self._is_silence_hours():

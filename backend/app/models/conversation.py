@@ -27,6 +27,7 @@ class Conversation(Base):
         comment="Message role: user | assistant",
     )
     content = Column(Text, nullable=False, comment="Message text content")
+    channel = Column(String(16), nullable=True)  # "wecom_kf", "ilink", "wecom_app"
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,

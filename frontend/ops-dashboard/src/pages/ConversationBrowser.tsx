@@ -4,7 +4,8 @@ import { apiGet } from '../api/client'
 
 interface Elder {
   id: number
-  nickname: string
+  nickname: string | null
+  wechat_user_id: string
   engagement_status: string
   last_message_at: string | null
   total_messages: number
@@ -179,7 +180,7 @@ export default function ConversationBrowser() {
               >
                 <div className="flex items-center gap-2">
                   <span className={`w-2 h-2 rounded-full ${statusColors[elder.engagement_status] || 'bg-gray-400'}`} />
-                  <span className="text-sm font-medium truncate">{elder.nickname}</span>
+                  <span className="text-sm font-medium truncate">{elder.nickname || elder.wechat_user_id || '未命名用户'}</span>
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-xs text-gray-400">{statusLabels[elder.engagement_status] || elder.engagement_status}</span>
@@ -193,7 +194,7 @@ export default function ConversationBrowser() {
           <div className="w-[300px] flex-shrink-0 bg-white rounded-lg shadow-sm border overflow-auto">
             <div className="p-3 border-b bg-gray-50 flex justify-between items-center">
               <h3 className="text-sm font-semibold text-gray-700">
-                {selectedElder ? `${selectedElder.nickname} 的对话` : '请选择用户'}
+                {selectedElder ? `${selectedElder.nickname || selectedElder.wechat_user_id || '未命名'} 的对话` : '请选择用户'}
               </h3>
               {selectedElder && (
                 <button

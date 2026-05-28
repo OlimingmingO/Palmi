@@ -32,12 +32,12 @@ class MessageTag(Base):
     message_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
     tag_id = Column(SmallInteger, ForeignKey("intent_tags.id"), nullable=False)
     confidence = Column(Float, nullable=False, default=1.0)
-    source = Column(String(16), nullable=False, default="llm", comment="llm / manual")
+    source = Column(String(16), nullable=False, default="llm", comment="llm / manual / ai_overridden")
     needs_review = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
-        CheckConstraint("source IN ('llm', 'manual')", name="ck_message_tags_source"),
+        CheckConstraint("source IN ('llm', 'manual', 'ai_overridden')", name="ck_message_tags_source"),
         CheckConstraint("confidence >= 0.0 AND confidence <= 1.0", name="ck_message_tags_confidence"),
     )
 
@@ -53,6 +53,7 @@ class TagCorrection(Base):
     message_tag_id = Column(UUID(as_uuid=True), ForeignKey("message_tags.id", ondelete="CASCADE"), nullable=False, index=True)
     original_tag_id = Column(SmallInteger, ForeignKey("intent_tags.id"), nullable=False)
     corrected_tag_id = Column(SmallInteger, ForeignKey("intent_tags.id"), nullable=False)
+    new_tag = Column(Text, nullable=True, comment="Comma-joined corrected tag names (supports multi-tag corrections)")
     reason = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

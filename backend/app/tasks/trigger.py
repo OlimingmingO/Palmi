@@ -27,6 +27,34 @@ def _db_trigger_type(engine_type: str) -> str:
     return _TRIGGER_TYPE_DB_MAP.get(engine_type, engine_type)
 
 
+async def _send_to_elder(elder, message_content: str):
+    """Route a proactive message to the correct channel based on elder's user ID.
+
+    - If wechat_user_id ends with @im.wechat → send via iLink
+    - Otherwise → send via WeCom API
+    """
+    user_id = elder.wechat_user_id
+
+    if user_id.endswith("@im.wechat"):
+        # iLink channel — retrieve stored context_token
+        from app.gateway.ilink_bot import send_message, get_context_token
+        context_token = await get_context_token(user_id)
+        if context_token:
+            await send_message(user_id, message_content, context_token)
+            return True
+        else:
+            logger.warning(
+                "No context_token for iLink user %s — cannot send proactive message",
+                user_id,
+            )
+            return False
+    else:
+        # WeCom channel
+        from app.gateway.wecom_api import send_text_message
+        await send_text_message(user_id=user_id, content=message_content)
+        return True
+
+
 # ─────────────────────────────────────────────────────────
 # Top-level Beat-triggered task: evaluate all elders
 # ─────────────────────────────────────────────────────────
@@ -227,8 +255,10 @@ async def _send_async(
     content: str,
 ) -> None:
     """Async core of proactive message delivery."""
+    from types import SimpleNamespace
+    from sqlalchemy import select
     from app.database import async_session_factory
-    from app.gateway.wecom_api import send_text_message
+    from app.models.elder import Elder
     from app.services.trigger_engine import trigger_engine
 
     wecom_msg_id = None
@@ -236,24 +266,31 @@ async def _send_async(
     skip_reason = None
 
     try:
-        # send_text_message returns a WeCom API response dict
-        resp = await send_text_message(
-            user_id=wechat_user_id,
-            content=content,
-        )
-        # Extract msgid from response; check errcode for success
-        if resp.get("errcode", 0) == 0:
+        # Resolve elder for channel routing (iLink vs WeCom)
+        async with async_session_factory() as lookup_session:
+            elder = (
+                await lookup_session.execute(
+                    select(Elder).where(Elder.wechat_user_id == wechat_user_id)
+                )
+            ).scalar_one_or_none()
+        if elder is None:
+            # Fallback: minimal object so routing still works on wechat_user_id
+            elder = SimpleNamespace(wechat_user_id=wechat_user_id)
+
+        sent = await _send_to_elder(elder, content)
+        if sent:
             status = "sent"
-            wecom_msg_id = resp.get("msgid")
             logger.info(
-                "Proactive message sent to elder %s (type=%s, wecom_id=%s)",
-                elder_id, trigger_type, wecom_msg_id,
+                "Proactive message sent to elder %s (type=%s, channel=%s)",
+                elder_id,
+                trigger_type,
+                "ilink" if wechat_user_id.endswith("@im.wechat") else "wecom",
             )
         else:
-            skip_reason = resp.get("errmsg", "unknown WeCom error")[:256]
+            skip_reason = "delivery skipped (e.g. missing iLink context_token)"
             logger.error(
-                "WeCom returned error for elder %s: errcode=%s errmsg=%s",
-                elder_id, resp.get("errcode"), resp.get("errmsg"),
+                "Failed to send proactive message to elder %s: %s",
+                elder_id, skip_reason,
             )
     except Exception as e:
         skip_reason = str(e)[:256]

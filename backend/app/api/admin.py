@@ -30,6 +30,8 @@ from sqlalchemy.types import Date as SqlDate
 
 from app.config import settings
 from app.database import get_db
+from app.gateway.wecom_kf import get_kf_contact_way
+from app.models.configurator import Configurator
 from app.models.conversation import Conversation
 from app.models.elder import Elder
 from app.models.elder_profile import ElderProfile
@@ -289,15 +291,25 @@ async def get_elder_detail(elder_id: str, db: AsyncSession = Depends(get_db)):
             .limit(1)
         )
     ).scalar_one_or_none()
-    config_status = (
+
+    # Fetch configurator(s) linked to this elder
+    configurator_rows = (
+        await db.execute(
+            select(Configurator).where(Configurator.elder_id == elder_uuid)
+        )
+    ).scalars().all()
+
+    configurators = [
         {
-            "version": latest_profile.version,
-            "last_updated_by": latest_profile.last_updated_by,
-            "updated_at": latest_profile.updated_at.isoformat() if latest_profile.updated_at else None,
+            "id": _uuid_str(c.id),
+            "nickname": c.nickname,
+            "relationship": c.relationship,
+            "phone": c.phone,
+            "is_primary": c.is_primary,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
         }
-        if latest_profile
-        else None
-    )
+        for c in configurator_rows
+    ]
 
     last_message_at = recent_rows[0].created_at if recent_rows else None
 
@@ -319,7 +331,14 @@ async def get_elder_detail(elder_id: str, db: AsyncSession = Depends(get_db)):
         "tag_distribution": tag_distribution,
         "trigger_history": trigger_history,
         "pke_status": pke_status,
-        "config_status": config_status,
+        "config_status": {
+            "has_profile": latest_profile is not None,
+            "version": latest_profile.version if latest_profile else None,
+            "last_updated_by": latest_profile.last_updated_by if latest_profile else None,
+            "updated_at": latest_profile.updated_at.isoformat() if latest_profile and latest_profile.updated_at else None,
+            "content": latest_profile.content if latest_profile else None,
+        },
+        "configurators": configurators,
     }
 
 
@@ -676,7 +695,7 @@ async def list_tag_review_queue(
 # ---------------------------------------------------------------------------
 
 class TagCorrectRequest(BaseModel):
-    new_tag: str
+    corrected_tags: list[str] = Field(..., min_length=1)
 
 
 @router.patch("/tags/{tag_id}")
@@ -686,46 +705,95 @@ async def correct_tag(
     db: AsyncSession = Depends(get_db),
     operator: str = Depends(verify_ops_auth),
 ):
-    """Manually correct a message tag and log a TagCorrection audit row."""
+    """Manually correct a message tag with one or more replacement tags.
+
+    Marks the original MessageTag as ``ai_overridden`` once, then creates a new
+    manual MessageTag for each entry in ``corrected_tags`` and records a single
+    TagCorrection audit row covering the whole correction.
+    """
     try:
         mt_uuid = uuid.UUID(tag_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid tag_id format")
 
-    message_tag = (
+    # De-duplicate while preserving order.
+    seen: set[str] = set()
+    tag_names: list[str] = []
+    for name in body.corrected_tags:
+        if name and name not in seen:
+            seen.add(name)
+            tag_names.append(name)
+    if not tag_names:
+        raise HTTPException(status_code=400, detail="corrected_tags must be non-empty")
+
+    original_mt = (
         await db.execute(select(MessageTag).where(MessageTag.id == mt_uuid))
     ).scalar_one_or_none()
-    if message_tag is None:
+    if original_mt is None:
         raise HTTPException(status_code=404, detail="MessageTag not found")
 
-    new_tag = (
-        await db.execute(select(IntentTag).where(IntentTag.name == body.new_tag))
-    ).scalar_one_or_none()
-    if new_tag is None:
-        raise HTTPException(status_code=404, detail=f"Intent tag '{body.new_tag}' not found")
+    intent_rows = (
+        await db.execute(select(IntentTag).where(IntentTag.name.in_(tag_names)))
+    ).scalars().all()
+    intent_by_name = {row.name: row for row in intent_rows}
+    missing = [n for n in tag_names if n not in intent_by_name]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Intent tag(s) not found: {', '.join(missing)}",
+        )
 
-    original_tag_id = message_tag.tag_id
-    message_tag.tag_id = new_tag.id
-    message_tag.source = "manual"
-    message_tag.confidence = 1.0
-    message_tag.needs_review = False
+    original_tag_id = original_mt.tag_id
 
+    # Mark the original AI-generated tag as overridden ONCE (preserve audit trail).
+    original_mt.source = "ai_overridden"
+    original_mt.needs_review = False
+
+    # Create a NEW MessageTag for EACH corrected tag name.
+    created: list[tuple[MessageTag, IntentTag]] = []
+    for name in tag_names:
+        intent_tag = intent_by_name[name]
+        new_mt = MessageTag(
+            id=uuid.uuid4(),
+            elder_id=original_mt.elder_id,
+            message_id=original_mt.message_id,
+            tag_id=intent_tag.id,
+            source="manual",
+            confidence=1.0,
+            needs_review=False,
+        )
+        db.add(new_mt)
+        created.append((new_mt, intent_tag))
+
+    # Single TagCorrection audit row covering this correction. ``corrected_tag_id``
+    # holds the first corrected tag (FK is single-valued); the full set of
+    # corrected tag names is preserved in ``new_tag``.
     correction = TagCorrection(
-        message_tag_id=message_tag.id,
+        message_tag_id=original_mt.id,
         original_tag_id=original_tag_id,
-        corrected_tag_id=new_tag.id,
+        corrected_tag_id=created[0][1].id,
+        new_tag=",".join(body.corrected_tags),
         reason=f"Corrected by ops user '{operator}'",
     )
     db.add(correction)
     await db.flush()
 
+    new_tags_response = [
+        {
+            "id": _uuid_str(mt.id),
+            "message_id": _uuid_str(mt.message_id),
+            "tag_id": intent_tag.id,
+            "tag_name": intent_tag.name,
+            "source": mt.source,
+            "confidence": float(mt.confidence),
+        }
+        for mt, intent_tag in created
+    ]
+
     return {
-        "id": _uuid_str(message_tag.id),
-        "message_id": _uuid_str(message_tag.message_id),
-        "tag_id": message_tag.tag_id,
-        "tag_name": new_tag.name,
-        "source": message_tag.source,
-        "confidence": float(message_tag.confidence),
+        "original_message_tag_id": _uuid_str(original_mt.id),
+        "new_tag_ids": [t["id"] for t in new_tags_response],
+        "new_tags": new_tags_response,
         "correction_id": _uuid_str(correction.id),
     }
 
@@ -851,6 +919,52 @@ async def dismiss_unmet_need(need_id: str, db: AsyncSession = Depends(get_db)):
 # /stats/dashboard
 # ---------------------------------------------------------------------------
 
+async def _compute_session_stats(db: AsyncSession) -> tuple[float, float]:
+    """Approximate sessions using 30-min gap boundary over last 7 days.
+
+    Returns:
+        (avg_conversation_frequency, avg_session_depth)
+        - avg_conversation_frequency: avg weekly session count per active elder
+        - avg_session_depth: avg messages (turns) per session
+    """
+    seven_days_ago = _now_utc() - timedelta(days=7)
+
+    # Fetch all conversations from last 7 days ordered by elder + time
+    stmt = (
+        select(Conversation.elder_id, Conversation.created_at)
+        .where(Conversation.created_at >= seven_days_ago)
+        .order_by(Conversation.elder_id, Conversation.created_at)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    if not rows:
+        return 0.0, 0.0  # frequency, depth
+
+    # Split into sessions: gap > 30 min = new session
+    total_sessions = 0
+    total_messages = len(rows)
+    active_elders = set()
+
+    prev_elder = None
+    prev_time = None
+
+    for elder_id, created_at in rows:
+        active_elders.add(elder_id)
+        if elder_id != prev_elder or prev_time is None:
+            total_sessions += 1
+        elif (created_at - prev_time).total_seconds() > 1800:  # 30 min
+            total_sessions += 1
+        prev_elder = elder_id
+        prev_time = created_at
+
+    active_count = len(active_elders)
+    avg_frequency = total_sessions / active_count if active_count else 0.0
+    avg_depth = total_messages / total_sessions if total_sessions else 0.0
+
+    return round(avg_frequency, 1), round(avg_depth, 1)
+
+
 @router.get("/stats/dashboard")
 async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     """Overview metrics for the ops dashboard home page."""
@@ -906,17 +1020,8 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
         elif status_val == "new":
             new_count += 1
 
-    # avg_session_depth — messages per (elder, day) averaged across all (elder, day) pairs
-    day_col = cast(Conversation.created_at, SqlDate)
-    session_counts = (
-        await db.execute(
-            select(func.count(Conversation.id))
-            .group_by(Conversation.elder_id, day_col)
-        )
-    ).scalars().all()
-    avg_session_depth = (
-        sum(session_counts) / len(session_counts) if session_counts else 0.0
-    )
+    # Session-based metrics: approximate sessions via 30-min gap over last 7 days
+    avg_conversation_frequency, avg_session_depth = await _compute_session_stats(db)
 
     return {
         "total_users": int(total_users),
@@ -927,7 +1032,8 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
         "silent_count": silent_count,
         "at_risk_count": at_risk_count,
         "new_count": new_count,
-        "avg_session_depth": round(float(avg_session_depth), 2),
+        "avg_conversation_frequency": avg_conversation_frequency,
+        "avg_session_depth": avg_session_depth,
     }
 
 
@@ -980,3 +1086,45 @@ async def get_pke_status(elder_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Elder not found")
 
     return _read_pke_status(elder_id)
+
+
+# ---------------------------------------------------------------------------
+# /kf/contact-way
+# ---------------------------------------------------------------------------
+
+@router.get("/kf/contact-way")
+async def kf_contact_way(open_kf_id: str = Query(...)):
+    """Generate a WeChat Customer Service contact entry link and QR code.
+
+    Operators can share this link/QR with elders to start chatting with XiaoBan.
+    """
+    result = await get_kf_contact_way(open_kf_id)
+    return result
+
+
+# ---- iLink Bot Setup ----
+
+@router.post("/ilink/qr")
+async def ilink_request_qr():
+    """Request a QR code for iLink Bot login.
+
+    Returns the QR code identifier and image content for display.
+    This is a one-time setup flow.
+    """
+    from app.gateway.ilink_bot import request_qr_code
+    result = await request_qr_code()
+    if not result.get("qrcode"):
+        raise HTTPException(status_code=502, detail="Failed to get QR code from iLink")
+    return result
+
+
+@router.get("/ilink/qr-status")
+async def ilink_qr_status(qrcode: str = Query(...)):
+    """Poll iLink QR code scan status.
+
+    Returns status: waiting, scanned, confirmed, expired.
+    On confirmed: also returns bot_token and account_id.
+    """
+    from app.gateway.ilink_bot import check_qr_status
+    result = await check_qr_status(qrcode)
+    return result
